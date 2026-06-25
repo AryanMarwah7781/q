@@ -34,17 +34,53 @@ def _cmd_synth(args):
 
 
 def _cmd_capture(args):
-    from .ingest.udp_capture import capture_udp
+    if args.native:
+        from .ingest.pcap import capture_native_udp as capture
+        cap = capture(host=args.host, port=args.port, max_frames=args.frames,
+                      timeout_s=args.timeout)
+    else:
+        from .ingest.udp_capture import capture_udp
+        cap = capture_udp(host=args.host, port=args.port,
+                          max_frames=args.frames, timeout_s=args.timeout)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     n = 0
-    for frame in capture_udp(host=args.host, port=args.port,
-                             max_frames=args.frames, timeout_s=args.timeout):
+    for frame in cap:
         save_frame_npz(out / f"frame_{frame.frame_id:05d}.npz", frame)
         n += 1
         print(f"  captured frame {frame.frame_id} ({len(frame)} pts)")
     print(f"captured {n} frames -> {out}")
+
+
+def _cmd_raw_info(args):
+    from .ingest.pcap import _iter_pcap_records, _udp_payload
+    from .raw_protocol import NATIVE_MAGIC, iter_frames_from_stream
+
+    path = Path(args.file)
+    data = path.read_bytes()
+    counts: dict[int, int] = {}
+    if path.suffix in (".pcap", ".pcapng"):
+        streams = (_udp_payload(lt, p) for lt, p in _iter_pcap_records(data))
+        streams = (s for s in streams if s and NATIVE_MAGIC in s)
+        blob = b"".join(streams)
+    else:
+        blob = data
+    crc_ok = crc_total = 0
+    for pkt in iter_frames_from_stream(blob, check_crc=True):
+        counts[pkt.packet_type] = counts.get(pkt.packet_type, 0) + 1
+        if pkt.crc_ok is not None:
+            crc_total += 1
+            crc_ok += int(pkt.crc_ok)
+    names = {102: "3D points (102)", 103: "2D points (103)",
+             104: "IMU (104)", 105: "version (105)"}
+    print(f"file: {path}  ({len(data)/1e6:.1f} MB)")
+    print("native packets:")
+    for t, c in sorted(counts.items()):
+        print(f"  {names.get(t, f'type {t}'):20s} {c}")
+    if crc_total:
+        print(f"crc32 matched (zlib): {crc_ok}/{crc_total} "
+              f"(informational; vendor CRC coverage is undocumented)")
 
 
 def _cmd_replay(args):
@@ -149,11 +185,19 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--port", type=int, default=6201)
     pc.add_argument("--frames", type=int, default=None)
     pc.add_argument("--timeout", type=float, default=5.0)
+    pc.add_argument("--native", action="store_true",
+                    help="parse the device's native 0x55AA050A framing instead of "
+                         "the open replay payload")
     pc.set_defaults(func=_cmd_capture)
 
     pbi = sub.add_parser("bag-info", help="summarize a Unitree L2 ROS1 .bag")
     pbi.add_argument("bag")
     pbi.set_defaults(func=_cmd_bag_info)
+
+    pri = sub.add_parser("raw-info",
+                         help="summarize a native L2 capture (.pcap / raw dump)")
+    pri.add_argument("file")
+    pri.set_defaults(func=_cmd_raw_info)
 
     pr = sub.add_parser("replay", help="replay a dataset over UDP")
     pr.add_argument("dataset")
@@ -164,7 +208,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     prun = sub.add_parser("run", help="full pipeline from a source")
     prun.add_argument("--source", default="synthetic",
-                      help="'synthetic', 'udp', or a dataset directory")
+                      help="'synthetic', 'udp', a dataset dir, a .bag, or a "
+                           "native .pcap / .bin raw capture")
     _add_recon_export_args(prun)
     prun.set_defaults(func=_cmd_run)
 

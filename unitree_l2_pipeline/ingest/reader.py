@@ -24,6 +24,23 @@ def iter_frames(path: str | Path, *, max_frames: int | None = None) -> Iterator[
 
             yield from iter_bag_frames(path, max_frames=max_frames)
             return
+        if path.suffix in (".pcap", ".pcapng"):
+            from .pcap import iter_frames_from_pcap
+
+            it = iter_frames_from_pcap(path)
+            for n, fr in enumerate(it):
+                if max_frames is not None and n >= max_frames:
+                    return
+                yield fr
+            return
+        if path.suffix in (".bin", ".raw"):
+            from .pcap import iter_frames_from_raw
+
+            for n, fr in enumerate(iter_frames_from_raw(path)):
+                if max_frames is not None and n >= max_frames:
+                    return
+                yield fr
+            return
         yield _load_one(path)
         return
     files = sorted(

@@ -93,25 +93,26 @@ scripts/fetch_l2_bag.sh indoor                  # or: park
 unitree-l2 run --source data/captures/L2_Indoor.bag --max-frames-cap 60 --out output
 ```
 
-**B. Bridge the vendor SDK live.** Build `unilidar_sdk2`, and in its point-cloud
-callback hand the points to a `FrameAssembler` (see
+**B. A raw capture — `.pcap`, raw dump, or live native UDP.** When you only have raw bytes
+off the wire (no SDK, no ROS), the pipeline parses the device's native `0x55AA050A`
+framing directly. Pure stdlib + numpy, so it runs on Windows:
+
+```bash
+unitree-l2 raw-info capture.pcap                 # what's inside the capture
+unitree-l2 run --source capture.pcap --out output
+unitree-l2 capture --native --port 6201 --out data/captures/live   # live
+```
+
+> Faithful for ranges/intensities/IMU/timestamps; **Cartesian XYZ is an approximate,
+> calibration-free reconstruction** (the exact polar→XYZ calibration lives in the closed
+> SDK). For metric-accurate clouds, prefer a `.bag` (option **A**). See
+> [`docs/raw_capture.md`](docs/raw_capture.md).
+
+**C. Bridge the vendor SDK live.** For exact points without recording, build
+`unilidar_sdk2` and feed its point-cloud callback into a `FrameAssembler` (see
 [`unitree_l2_pipeline/ingest/udp_capture.py`](unitree_l2_pipeline/ingest/udp_capture.py)).
 Everything downstream is identical.
 
-**C. UDP capture.** The L2 streams to host `192.168.1.2:6201` by default. Configure your
-NIC to that subnet and capture:
-
-```bash
-unitree-l2 capture --out data/captures/live --frames 100
-unitree-l2 export data/captures/live --out output
-```
-
-> The capture path consumes the open, documented UDP payload format in
-> [`protocol.py`](unitree_l2_pipeline/protocol.py). The vendor's on-wire framing is
-> proprietary and decoded inside the closed SDK; once decoded to points the path is the
-> same. Use option **B** to bridge it, or `unitree-l2 replay <dataset>` to exercise the
-> capture path end-to-end over loopback.
->
 > **Poses for real data.** Real bags carry IMU but no ground-truth poses, so the pipeline
 > falls back to frame-to-frame ICP, which drifts over long sequences. For drift-free maps,
 > supply an external trajectory with `--poses`:
@@ -137,9 +138,10 @@ unitree-l2 export data/captures/live --out output
 |---|---|
 | `unitree-l2 synth --out DIR --frames N` | Generate a synthetic L2 dataset to disk |
 | `unitree-l2 bag-info BAG` | Summarize a Unitree L2 ROS1 `.bag` (topics, counts) |
-| `unitree-l2 capture --out DIR` | Capture a live L2 UDP stream (`0.0.0.0:6201`) |
+| `unitree-l2 raw-info FILE` | Summarize a native capture (`.pcap` / raw dump) |
+| `unitree-l2 capture [--native] --out DIR` | Capture a live L2 UDP stream (`0.0.0.0:6201`) |
 | `unitree-l2 replay DATASET` | Replay a recorded dataset over UDP (test capture) |
-| `unitree-l2 run --source synthetic\|udp\|DIR\|BAG` | Full pipeline → USD |
+| `unitree-l2 run --source synthetic\|udp\|DIR\|BAG\|PCAP` | Full pipeline → USD |
 | `unitree-l2 export DATASET\|BAG` | Reconstruct a recorded dataset/bag → USD |
 
 Key reconstruction/export flags (`run`/`export`):
@@ -191,12 +193,14 @@ See [`docs/data_format.md`](docs/data_format.md) and
 ```
 unitree_l2_pipeline/
 ├── formats.py            L2 point struct, LidarFrame, PCD/PLY/NPZ I/O, transforms
-├── protocol.py           L2 UDP/serial constants + datagram (de)serialization
+├── protocol.py           open UDP replay payload (de)serialization
+├── raw_protocol.py       native 0x55AA050A device framing + body decoders
 ├── ingest/
 │   ├── synthetic.py      synthetic L2 sample generator (ray-cast room scene)
 │   ├── rosbag.py         dependency-free ROS1 .bag reader (real Unitree L2 bags)
-│   ├── udp_capture.py    live UDP capture + frame reassembly + replay
-│   └── reader.py         load recorded datasets (.npz / .pcd / .bag)
+│   ├── pcap.py           native capture ingest (.pcap / raw dump / live UDP)
+│   ├── udp_capture.py    open-format UDP capture + frame reassembly + replay
+│   └── reader.py         load recorded sources (.npz / .pcd / .bag / .pcap / .bin)
 ├── reconstruct/
 │   ├── registration.py   ICP (numpy + optional Open3D), pose chaining
 │   ├── pose_source.py    external trajectories (cuVSLAM/Isaac ROS odom, TUM) + extrinsic
