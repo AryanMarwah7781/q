@@ -1,7 +1,24 @@
 # Sample Unitree L2 data
 
-The official Unitree L2 SDK ships no recorded sample data, so this directory provides a
-self-contained sample so the pipeline is runnable out of the box.
+This directory provides self-contained samples so the pipeline is runnable out of the box
+— both **real** Unitree L2 data and a **synthetic** scene.
+
+## `l2_indoor_real/`
+
+24 **real** L2 scans extracted from Unitree's official
+[L2 Indoor Point Cloud Data.bag](https://oss-global-cdn.unitree.com/static/L2%20Indoor%20Point%20Cloud%20Data.bag)
+(used by [`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar)).
+Each `.npz` holds the real `(x, y, z, intensity, time, ring)` points plus the IMU sample
+for that scan. Reconstruct them with:
+
+```bash
+unitree-l2 export data/samples/l2_indoor_real --out output
+```
+
+> Real bags have no ground-truth poses, so reconstruction falls back to ICP (which drifts
+> over long runs). For accurate maps, get per-scan poses from `point_lio_unilidar`. The
+> full 520 MB bag (2807 scans) is **not** committed — fetch it with
+> `scripts/fetch_l2_bag.sh indoor`.
 
 ## `synthetic_room/`
 

@@ -122,6 +122,10 @@ def _grid_mean_neighbor_distance(xyz: np.ndarray, k: int) -> np.ndarray:
                 cand.append(nb)
         cand_idx = np.concatenate(cand)
         cand_pts = xyz64[cand_idx]
+        if cand_pts.shape[0] <= 1:
+            # isolated point with no neighbours -> definite outlier
+            mean_d[rows] = np.inf
+            continue
         pts = xyz64[rows]
         d2 = (np.sum(pts * pts, axis=1)[:, None]
               - 2.0 * (pts @ cand_pts.T)

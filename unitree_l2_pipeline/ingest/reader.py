@@ -15,10 +15,15 @@ import numpy as np
 from ..formats import LidarFrame, load_frame_npz, load_pcd
 
 
-def iter_frames(path: str | Path) -> Iterator[LidarFrame]:
-    """Yield frames from a dataset directory (or a single frame file)."""
+def iter_frames(path: str | Path, *, max_frames: int | None = None) -> Iterator[LidarFrame]:
+    """Yield frames from a dataset directory, a single frame file, or a ROS bag."""
     path = Path(path)
     if path.is_file():
+        if path.suffix == ".bag":
+            from .rosbag import iter_bag_frames
+
+            yield from iter_bag_frames(path, max_frames=max_frames)
+            return
         yield _load_one(path)
         return
     files = sorted(
@@ -33,9 +38,9 @@ def iter_frames(path: str | Path) -> Iterator[LidarFrame]:
         yield frame
 
 
-def load_dataset(path: str | Path) -> list[LidarFrame]:
-    """Eagerly load every frame in a dataset directory."""
-    return list(iter_frames(path))
+def load_dataset(path: str | Path, *, max_frames: int | None = None) -> list[LidarFrame]:
+    """Eagerly load every frame in a dataset directory (or ROS bag)."""
+    return list(iter_frames(path, max_frames=max_frames))
 
 
 def _load_one(p: Path) -> LidarFrame:

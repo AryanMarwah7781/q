@@ -21,8 +21,9 @@ from .reconstruct.registration import register_frames
 @dataclass
 class PipelineConfig:
     # ingest
-    source: str = "synthetic"          # synthetic | <dataset dir> | udp
-    num_frames: int = 24               # for synthetic
+    source: str = "synthetic"          # synthetic | <dataset dir or .bag> | udp
+    num_frames: int = 24               # for synthetic / udp
+    max_frames: int | None = None      # cap frames read from a dataset / ROS bag
     seed: int = 0
     # reconstruct
     use_ground_truth_poses: bool = True
@@ -53,10 +54,10 @@ def _load_frames(cfg: PipelineConfig) -> list[LidarFrame]:
         from .ingest.udp_capture import capture_udp
 
         return list(capture_udp(max_frames=cfg.num_frames))
-    # otherwise treat as a dataset directory / file
+    # otherwise treat as a dataset directory / file / ROS bag
     from .ingest.reader import load_dataset
 
-    return load_dataset(cfg.source)
+    return load_dataset(cfg.source, max_frames=cfg.max_frames)
 
 
 def run_pipeline(cfg: PipelineConfig | None = None,
@@ -74,11 +75,14 @@ def run_pipeline(cfg: PipelineConfig | None = None,
         raise RuntimeError("no frames ingested")
 
     # 2. reconstruct ------------------------------------------------------
+    use_gt = cfg.use_ground_truth_poses and all(f.pose is not None for f in frames)
+    if cfg.use_ground_truth_poses and not use_gt:
+        log("[reconstruct] no stored poses (e.g. real bag) -> falling back to ICP")
     log("[reconstruct] estimating poses"
-        + (" (ground truth)" if cfg.use_ground_truth_poses else " (ICP)"))
+        + (" (ground truth)" if use_gt else " (ICP)"))
     poses = register_frames(
         frames,
-        use_ground_truth=cfg.use_ground_truth_poses,
+        use_ground_truth=use_gt,
         voxel=cfg.register_voxel,
     )
     log("[reconstruct] aggregating frames")

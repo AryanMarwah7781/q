@@ -65,3 +65,27 @@ To ingest from real hardware, bridge the SDK callback into
 
 A *dataset* is just a directory of per-frame `.npz` (or `.pcd`) files loaded in sorted
 filename order.
+
+## Real Unitree L2 ROS bags
+
+Unitree publishes real L2 recordings as ROS1 bags (`point_lio_unilidar`):
+
+| Dataset   | URL |
+|-----------|-----|
+| L2 Indoor | `https://oss-global-cdn.unitree.com/static/L2%20Indoor%20Point%20Cloud%20Data.bag` |
+| L2 Park   | `https://oss-global-cdn.unitree.com/static/L2%20Park%20Point%20Cloud%20Data.bag` |
+
+Each bag contains two topics:
+
+| Topic              | Type                      | Notes |
+|--------------------|---------------------------|-------|
+| `/unilidar/cloud`  | `sensor_msgs/PointCloud2` | `point_step` 32: `x,y,z` f32; `intensity` f32 @16; `ring` u16 @20; `time` f32 @24 |
+| `/unilidar/imu`    | `sensor_msgs/Imu`         | orientation, angular velocity, linear acceleration |
+
+`ingest/rosbag.py` reads these **without ROS installed**: it parses the ROS1 bag v2.0
+container (uncompressed / bz2 / lz4 chunks) and decodes the `PointCloud2` layout
+*dynamically* from the message's own `PointField` descriptors, so it adapts to firmware
+variations. (Note: in the published indoor bag the driver emits a constant `ring=1` and
+`intensity=255`; `time` is a valid per-point offset. The reader passes through whatever
+the bag actually contains.) Use `unitree-l2 bag-info <bag>` for a quick summary, and
+`scripts/fetch_l2_bag.sh` to download the bags (they are large, so not committed).

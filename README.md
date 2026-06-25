@@ -27,13 +27,21 @@ off the sensor, but it ships **no recorded sample data** and stops at the single
 level. There is no published, end-to-end path from "L2 scans" to "a reconstructed scene
 loaded in Isaac Sim".
 
-This repo fills that gap:
+Unitree *does* publish real L2 recordings — as ROS1 bags used by
+[`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar):
+
+* [L2 Indoor Point Cloud Data.bag](https://oss-global-cdn.unitree.com/static/L2%20Indoor%20Point%20Cloud%20Data.bag) (~520 MB)
+* [L2 Park Point Cloud Data.bag](https://oss-global-cdn.unitree.com/static/L2%20Park%20Point%20Cloud%20Data.bag)
+
+This repo wires those in directly (no ROS install needed) and fills the rest of the gap:
 
 1. A faithful re-implementation of the L2 **data model and network protocol**
    (18 rings; UDP ports `6101`/`6201`; IPs `192.168.1.62`/`192.168.1.2`).
-2. A **synthetic L2 data sample generator** so you can run the entire pipeline today
-   with no hardware — and a small recorded sample committed under
-   [`data/samples/`](data/samples).
+2. A **dependency-free ROS1 `.bag` reader** for Unitree's real L2 recordings
+   (`/unilidar/cloud` + `/unilidar/imu`), plus a **synthetic L2 generator** so you can
+   run the whole pipeline with no hardware *and* no download. Small samples of **both**
+   (real L2 frames extracted from the indoor bag, and a synthetic room) are committed
+   under [`data/samples/`](data/samples).
 3. Multi-frame **reconstruction** (pose registration via stored poses / IMU / ICP,
    then aggregation, voxel downsampling and outlier removal).
 4. **Export to Isaac Sim** as `UsdGeom.Points` in a ready-to-open `.usda` stage, plus a
@@ -52,10 +60,16 @@ unitree-l2 run --source synthetic --frames 24 --out output
 #   -> output/reconstruction.usda   (open this in Isaac Sim)
 #   -> output/reconstruction.pcd / .ply
 
-# 2) Or reconstruct the committed sample dataset:
+# 2) Or reconstruct a committed sample dataset (real L2 frames, or synthetic):
+unitree-l2 export data/samples/l2_indoor_real --out output   # real Unitree L2 data
 unitree-l2 export data/samples/synthetic_room --out output
 
-# 3) Then load it into Isaac Sim (inside Isaac's python env):
+# 3) Or use a full real Unitree L2 ROS bag (downloads ~520 MB):
+scripts/fetch_l2_bag.sh indoor                  # -> data/captures/L2_Indoor.bag
+unitree-l2 bag-info data/captures/L2_Indoor.bag
+unitree-l2 run --source data/captures/L2_Indoor.bag --max-frames-cap 60 --out output
+
+# 4) Then load the result into Isaac Sim (inside Isaac's python env):
 ./python.sh unitree_l2_pipeline/export/isaac_loader.py \
     --usd output/reconstruction.usda --as-instancer
 ```
@@ -68,15 +82,23 @@ can open it in Isaac Sim immediately.
 
 ## Using it with a real Unitree L2
 
-The pipeline produces and consumes `LidarFrame` objects, so there are two ways to feed
-it real hardware:
+The pipeline produces and consumes `LidarFrame` objects, so there are several ways to
+feed it real data:
 
-**A. Bridge the vendor SDK (recommended).** Build `unilidar_sdk2`, and in its point-cloud
+**A. A recorded ROS bag (easiest).** Use Unitree's published L2 bags (or your own
+recording of `/unilidar/cloud` + `/unilidar/imu`). No ROS install required:
+
+```bash
+scripts/fetch_l2_bag.sh indoor                  # or: park
+unitree-l2 run --source data/captures/L2_Indoor.bag --max-frames-cap 60 --out output
+```
+
+**B. Bridge the vendor SDK live.** Build `unilidar_sdk2`, and in its point-cloud
 callback hand the points to a `FrameAssembler` (see
 [`unitree_l2_pipeline/ingest/udp_capture.py`](unitree_l2_pipeline/ingest/udp_capture.py)).
 Everything downstream is identical.
 
-**B. UDP capture.** The L2 streams to host `192.168.1.2:6201` by default. Configure your
+**C. UDP capture.** The L2 streams to host `192.168.1.2:6201` by default. Configure your
 NIC to that subnet and capture:
 
 ```bash
@@ -87,8 +109,13 @@ unitree-l2 export data/captures/live --out output
 > The capture path consumes the open, documented UDP payload format in
 > [`protocol.py`](unitree_l2_pipeline/protocol.py). The vendor's on-wire framing is
 > proprietary and decoded inside the closed SDK; once decoded to points the path is the
-> same. Use option **A** to bridge it, or `unitree-l2 replay <dataset>` to exercise the
+> same. Use option **B** to bridge it, or `unitree-l2 replay <dataset>` to exercise the
 > capture path end-to-end over loopback.
+>
+> **Poses for real data.** Real bags carry IMU but no ground-truth poses, so the pipeline
+> falls back to frame-to-frame ICP, which drifts over long sequences. For
+> production-quality maps, run [`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar)
+> (or FAST-LIO) to get accurate per-scan poses and feed those in.
 
 ---
 
@@ -97,10 +124,11 @@ unitree-l2 export data/captures/live --out output
 | Command | Purpose |
 |---|---|
 | `unitree-l2 synth --out DIR --frames N` | Generate a synthetic L2 dataset to disk |
+| `unitree-l2 bag-info BAG` | Summarize a Unitree L2 ROS1 `.bag` (topics, counts) |
 | `unitree-l2 capture --out DIR` | Capture a live L2 UDP stream (`0.0.0.0:6201`) |
 | `unitree-l2 replay DATASET` | Replay a recorded dataset over UDP (test capture) |
-| `unitree-l2 run --source synthetic\|udp\|DIR` | Full pipeline → USD |
-| `unitree-l2 export DATASET` | Reconstruct a recorded dataset → USD |
+| `unitree-l2 run --source synthetic\|udp\|DIR\|BAG` | Full pipeline → USD |
+| `unitree-l2 export DATASET\|BAG` | Reconstruct a recorded dataset/bag → USD |
 
 Key reconstruction/export flags (`run`/`export`):
 
@@ -144,8 +172,9 @@ unitree_l2_pipeline/
 ├── protocol.py           L2 UDP/serial constants + datagram (de)serialization
 ├── ingest/
 │   ├── synthetic.py      synthetic L2 sample generator (ray-cast room scene)
+│   ├── rosbag.py         dependency-free ROS1 .bag reader (real Unitree L2 bags)
 │   ├── udp_capture.py    live UDP capture + frame reassembly + replay
-│   └── reader.py         load recorded datasets (.npz / .pcd)
+│   └── reader.py         load recorded datasets (.npz / .pcd / .bag)
 ├── reconstruct/
 │   ├── registration.py   ICP (numpy + optional Open3D), pose chaining
 │   └── aggregate.py      transform/merge/voxel-downsample/outlier-removal
@@ -154,7 +183,8 @@ unitree_l2_pipeline/
 │   └── isaac_loader.py   standalone Isaac Sim loader script
 ├── pipeline.py           orchestrates ingest → reconstruct → export
 └── cli.py                `unitree-l2` command line
-data/samples/             committed L2 sample dataset + example USD output
+data/samples/             real L2 frames (from the indoor bag) + synthetic room + example USD
+scripts/fetch_l2_bag.sh   download Unitree's full real L2 ROS bags (indoor/park)
 tests/                    pytest suite (numpy-only, runs in CI)
 ```
 

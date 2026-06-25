@@ -67,6 +67,7 @@ def _build_cfg(args) -> PipelineConfig:
     return PipelineConfig(
         source=args.source,
         num_frames=args.frames,
+        max_frames=args.max_frames_cap,
         seed=args.seed,
         use_ground_truth_poses=not args.icp,
         recon=recon,
@@ -75,6 +76,17 @@ def _build_cfg(args) -> PipelineConfig:
         point_width=args.point_width,
         save_intermediate=not args.no_intermediate,
     )
+
+
+def _cmd_bag_info(args):
+    from .ingest.rosbag import bag_info
+
+    info = bag_info(args.bag)
+    print(f"bag: {info['path']}")
+    print(f"size: {info['size_bytes'] / 1e6:.1f} MB   compression: {info['compression']}")
+    print("topics:")
+    for topic, meta in info["topics"].items():
+        print(f"  {topic:24s} {meta['type']:28s} {meta['messages']} msgs")
 
 
 def _cmd_run(args):
@@ -89,6 +101,8 @@ def _cmd_export(args):
 def _add_recon_export_args(p):
     p.add_argument("--frames", type=int, default=24,
                    help="synthetic/capture frame count")
+    p.add_argument("--max-frames-cap", type=int, default=None,
+                   help="cap frames read from a dataset/ROS bag (default: all)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--voxel", type=float, default=0.03,
                    help="reconstruction voxel size (m); 0 disables")
@@ -124,6 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--frames", type=int, default=None)
     pc.add_argument("--timeout", type=float, default=5.0)
     pc.set_defaults(func=_cmd_capture)
+
+    pbi = sub.add_parser("bag-info", help="summarize a Unitree L2 ROS1 .bag")
+    pbi.add_argument("bag")
+    pbi.set_defaults(func=_cmd_bag_info)
 
     pr = sub.add_parser("replay", help="replay a dataset over UDP")
     pr.add_argument("dataset")
