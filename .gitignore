@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Pipeline outputs (regenerable; keep committed examples under data/samples/)
+/output/
+/data/captures/
+
+# OS / editor
+.DS_Store
+*.swp

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unitree-l2-pipeline"
+version = "0.1.0"
+description = "Reconstruct Unitree 4D LiDAR L2 point clouds and export them to Isaac Sim (USD)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Unitree L2 Pipeline contributors" }]
+keywords = ["unitree", "lidar", "l2", "point cloud", "isaac sim", "usd", "reconstruction"]
+dependencies = [
+    "numpy>=1.21",
+]
+
+[project.optional-dependencies]
+# Optional accelerators / extras. The pipeline runs fully on numpy alone.
+accel = ["open3d>=0.17"]
+usd = ["usd-core>=23.0"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+unitree-l2 = "unitree_l2_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["unitree_l2_pipeline*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

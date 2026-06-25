@@ -1,0 +1,11 @@
+# Core (required) — the whole pipeline runs on numpy alone.
+numpy>=1.21
+
+# Optional accelerators (uncomment to enable):
+#   open3d  -> point-to-plane ICP + faster outlier removal
+#   usd-core-> author binary .usd directly (Isaac Sim ships its own pxr already)
+# open3d>=0.17
+# usd-core>=23.0
+
+# Dev/test
+# pytest>=7
