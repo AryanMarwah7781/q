@@ -113,9 +113,21 @@ unitree-l2 export data/captures/live --out output
 > capture path end-to-end over loopback.
 >
 > **Poses for real data.** Real bags carry IMU but no ground-truth poses, so the pipeline
-> falls back to frame-to-frame ICP, which drifts over long sequences. For
-> production-quality maps, run [`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar)
-> (or FAST-LIO) to get accurate per-scan poses and feed those in.
+> falls back to frame-to-frame ICP, which drifts over long sequences. For drift-free maps,
+> supply an external trajectory with `--poses`:
+>
+> ```bash
+> # cuVSLAM / Isaac ROS odometry recorded in the bag (GPU visual-inertial SLAM):
+> unitree-l2 run --source run.bag --poses run.bag \
+>     --poses-topic /visual_slam/tracking/odometry \
+>     --extrinsic "0.10 0 0.05 0 0 0 1" --out output
+>
+> # ...or a TUM trajectory file from PyCuVSLAM / point_lio_unilidar / FAST-LIO:
+> unitree-l2 run --source run.bag --poses traj.tum --extrinsic identity --out output
+> ```
+>
+> See [`docs/cuvslam.md`](docs/cuvslam.md) for the full cuVSLAM workflow (topics, the
+> LiDAR↔base extrinsic, and the `odom` vs `map` frames).
 
 ---
 
@@ -136,7 +148,13 @@ Key reconstruction/export flags (`run`/`export`):
 --voxel 0.03            voxel size (m) for downsampling; 0 disables
 --max-range 0.0         drop points beyond this range (m); 0 keeps all
 --no-outlier-removal    skip statistical outlier removal
---icp                   estimate poses with ICP instead of stored/odometry poses
+--icp                   estimate poses with ICP instead of stored poses
+--poses PATH            external trajectory (TUM file or .bag with odometry) for
+                        drift-free poses, e.g. cuVSLAM / Isaac ROS, point_lio
+--poses-topic TOPIC     odometry topic when --poses is a .bag
+                        (default /visual_slam/tracking/odometry)
+--extrinsic SPEC        LiDAR->base extrinsic: 'identity', 'x y z qx qy qz qw',
+                        or 16 row-major 4x4 values
 --point-width 0.02      rendered point size in USD
 --usd-name NAME.usda    output stage filename
 ```
@@ -146,11 +164,15 @@ Key reconstruction/export flags (`run`/`export`):
 ## How reconstruction works
 
 * **Poses.** Each scan only sees part of the scene; to reconstruct we place every scan in
-  a common world frame. Best results come from poses supplied by odometry/SLAM (e.g.
-  [`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar) or
-  FAST-LIO). If frames carry poses (the synthetic generator and `.npz` records do), they
-  are used directly. Otherwise `--icp` runs frame-to-frame point-to-point ICP (numpy) or
-  point-to-plane ICP (Open3D, if installed) and chains the result into a trajectory.
+  a common world frame. Best results come from an external trajectory via `--poses`:
+  **cuVSLAM / Isaac ROS** odometry (GPU visual-inertial SLAM — see
+  [`docs/cuvslam.md`](docs/cuvslam.md)),
+  [`point_lio_unilidar`](https://github.com/unitreerobotics/point_lio_unilidar), or FAST-LIO,
+  as a TUM file or a `nav_msgs/Odometry` bag topic; poses are interpolated (SLERP) to each
+  scan's timestamp and composed with the LiDAR↔base `--extrinsic`. If no external poses are
+  given and frames carry their own (the synthetic generator and `.npz` records do), those
+  are used. Otherwise `--icp` runs frame-to-frame ICP (numpy, or point-to-plane via Open3D)
+  and chains the result — simplest, but drifts without loop closure.
 * **Aggregate.** All scans are transformed to world, merged, voxel-downsampled (uniform
   density + dedup), and cleaned with statistical outlier removal (a spatial-hash-grid
   implementation that scales to hundreds of thousands of points without a KD-tree).
@@ -177,6 +199,7 @@ unitree_l2_pipeline/
 │   └── reader.py         load recorded datasets (.npz / .pcd / .bag)
 ├── reconstruct/
 │   ├── registration.py   ICP (numpy + optional Open3D), pose chaining
+│   ├── pose_source.py    external trajectories (cuVSLAM/Isaac ROS odom, TUM) + extrinsic
 │   └── aggregate.py      transform/merge/voxel-downsample/outlier-removal
 ├── export/
 │   ├── usd_export.py     point cloud → .usda (no deps) / .usd (pxr)
@@ -200,6 +223,8 @@ pytest -q
 * Unitree L2 SDK — <https://github.com/unitreerobotics/unilidar_sdk2>
 * Unitree L1 SDK — <https://github.com/unitreerobotics/unilidar_sdk>
 * Point-LIO for Unitree LiDAR — <https://github.com/unitreerobotics/point_lio_unilidar>
+* cuVSLAM / Isaac ROS Visual SLAM — <https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam>
+* PyCuVSLAM (standalone Python cuVSLAM) — <https://github.com/nvidia-isaac/PyCuVSLAM>
 * Unitree 4D LiDAR L2 User Manual — <https://oss-global-cdn.unitree.com/static/Unitree%204D%20LiDAR%20L2%20User%20Manual.pdf>
 * NVIDIA Isaac Sim — <https://developer.nvidia.com/isaac/sim>
 * OpenUSD — <https://openusd.org>

@@ -27,6 +27,9 @@ class PipelineConfig:
     seed: int = 0
     # reconstruct
     use_ground_truth_poses: bool = True
+    pose_source: str | None = None     # path to a TUM trajectory or a bag with odometry
+    pose_topic: str = "/visual_slam/tracking/odometry"  # cuVSLAM / Isaac ROS
+    extrinsic: object = None           # LiDAR->base 4x4/7-tuple/"identity"
     recon: ReconstructionConfig = field(default_factory=ReconstructionConfig)
     register_voxel: float = 0.1
     # export
@@ -75,16 +78,35 @@ def run_pipeline(cfg: PipelineConfig | None = None,
         raise RuntimeError("no frames ingested")
 
     # 2. reconstruct ------------------------------------------------------
-    use_gt = cfg.use_ground_truth_poses and all(f.pose is not None for f in frames)
-    if cfg.use_ground_truth_poses and not use_gt:
-        log("[reconstruct] no stored poses (e.g. real bag) -> falling back to ICP")
-    log("[reconstruct] estimating poses"
-        + (" (ground truth)" if use_gt else " (ICP)"))
-    poses = register_frames(
-        frames,
-        use_ground_truth=use_gt,
-        voxel=cfg.register_voxel,
-    )
+    if cfg.pose_source:
+        # external trajectory (e.g. cuVSLAM / Isaac ROS odometry) -> drift-free
+        from .reconstruct.pose_source import (
+            load_cuvslam_bag,
+            load_tum,
+            parse_extrinsic,
+            poses_for_frames,
+        )
+
+        src = cfg.pose_source
+        is_bag = str(src).endswith(".bag")
+        log(f"[reconstruct] external poses from {'bag odom' if is_bag else 'TUM'} "
+            f"{src}")
+        traj = (load_cuvslam_bag(src, cfg.pose_topic) if is_bag else load_tum(src))
+        extr = parse_extrinsic(cfg.extrinsic)
+        log(f"[reconstruct] trajectory: {len(traj)} poses, "
+            f"{traj.duration:.1f}s span")
+        poses = poses_for_frames(frames, traj, extr)
+    else:
+        use_gt = cfg.use_ground_truth_poses and all(f.pose is not None for f in frames)
+        if cfg.use_ground_truth_poses and not use_gt:
+            log("[reconstruct] no stored poses (e.g. real bag) -> falling back to ICP")
+        log("[reconstruct] estimating poses"
+            + (" (ground truth)" if use_gt else " (ICP)"))
+        poses = register_frames(
+            frames,
+            use_ground_truth=use_gt,
+            voxel=cfg.register_voxel,
+        )
     log("[reconstruct] aggregating frames")
     recon = aggregate(frames, poses, cfg.recon)
     lo, hi = recon.bounds if len(recon) else (np.zeros(3), np.zeros(3))

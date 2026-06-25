@@ -70,6 +70,9 @@ def _build_cfg(args) -> PipelineConfig:
         max_frames=args.max_frames_cap,
         seed=args.seed,
         use_ground_truth_poses=not args.icp,
+        pose_source=args.poses,
+        pose_topic=args.poses_topic,
+        extrinsic=args.extrinsic,
         recon=recon,
         out_dir=args.out,
         usd_name=args.usd_name,
@@ -111,6 +114,15 @@ def _add_recon_export_args(p):
     p.add_argument("--no-outlier-removal", action="store_true")
     p.add_argument("--icp", action="store_true",
                    help="estimate poses with ICP instead of stored poses")
+    p.add_argument("--poses", default=None,
+                   help="external trajectory for drift-free poses: a TUM file "
+                        "(timestamp tx ty tz qx qy qz qw) or a .bag with a "
+                        "cuVSLAM/Isaac ROS odometry topic")
+    p.add_argument("--poses-topic", default="/visual_slam/tracking/odometry",
+                   help="odometry topic name when --poses is a .bag")
+    p.add_argument("--extrinsic", default=None,
+                   help="LiDAR->base extrinsic: 'identity', 7 values "
+                        "'x y z qx qy qz qw', or 16 row-major 4x4 values")
     p.add_argument("--out", default="output", help="output directory")
     p.add_argument("--usd-name", default="reconstruction.usda")
     p.add_argument("--point-width", type=float, default=0.02)

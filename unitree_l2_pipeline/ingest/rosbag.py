@@ -202,9 +202,63 @@ def _decode_imu(buf: bytes) -> ImuSample:
     )
 
 
+def _decode_odometry(buf: bytes) -> tuple[float, np.ndarray, np.ndarray]:
+    """nav_msgs/Odometry -> (stamp, position xyz, orientation [w,x,y,z])."""
+    i = 0
+    stamp, i = _read_header(buf, i)
+    _child, i = _read_string(buf, i)  # child_frame_id
+    px, py, pz, ox, oy, oz, ow = struct.unpack_from("<7d", buf, i)
+    return (stamp,
+            np.array([px, py, pz], dtype=np.float64),
+            np.array([ow, ox, oy, oz], dtype=np.float64))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def iter_bag_odometry(
+    path: str | Path,
+    topic: str = "/visual_slam/tracking/odometry",
+) -> Iterator[tuple[float, np.ndarray, np.ndarray]]:
+    """Yield ``(stamp, position, quaternion_wxyz)`` from a ``nav_msgs/Odometry`` topic.
+
+    The default topic is the one cuVSLAM / ``isaac_ros_visual_slam`` publishes
+    (``/visual_slam/tracking/odometry`` = ``odom_frame -> base_link``). Pass the
+    SLAM topic (``.../tracking/slam_path`` consumers use the map frame) or any
+    odometry topic in your bag.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    if not data.startswith(_MAGIC):
+        raise ValueError(f"{path} is not a ROS1 bag (bad magic)")
+    conn_topic: dict[int, str] = {}
+
+    def walk(records):
+        for fields, rec in records:
+            op = fields.get("op", b"\x00")[0]
+            if op == _OP_CONNECTION:
+                conn = struct.unpack("<I", fields["conn"])[0]
+                t = fields.get("topic", b"").decode("ascii", "replace")
+                if not t:
+                    t = _read_header_fields(rec).get("topic", b"").decode("ascii", "replace")
+                conn_topic[conn] = t
+            elif op == _OP_MSG_DATA:
+                conn = struct.unpack("<I", fields["conn"])[0]
+                if conn_topic.get(conn) == topic:
+                    yield _decode_odometry(rec)
+
+    for fields, rec in _iter_records(data, start=len(_MAGIC)):
+        op = fields.get("op", b"\x00")[0]
+        if op == _OP_CHUNK:
+            chunk = _decompress_chunk(
+                fields.get("compression", b"none"), rec,
+                int(struct.unpack("<I", fields["size"])[0]) if "size" in fields else len(rec),
+            )
+            yield from walk(_iter_records(chunk, 0))
+        elif op in (_OP_CONNECTION, _OP_MSG_DATA):
+            yield from walk([(fields, rec)])
+
 
 def iter_bag_frames(
     path: str | Path,
